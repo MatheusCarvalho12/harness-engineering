@@ -1,0 +1,20 @@
+.git
+.gitignore
+.env
+.env.*
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+docker
+docs
+tests
+
+# Keep prompts/*.md (needed at runtime); only drop top-level docs.
+/README.md
+/CLAUDE.md
+/ASSIGNMENT.md

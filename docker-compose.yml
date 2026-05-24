@@ -1,0 +1,80 @@
+# Multi-agent solver: one Redis broker, one FastAPI gateway, and four agent
+# workers (one image, role selected via AGENT_ROLE). The executor is the only
+# parallelizable stage, so it is left unnamed and runs multiple replicas.
+#
+# Scale executors at runtime:
+#   docker compose up --build --scale executor=3
+
+# Shared bits reused by every agent worker (same image, same wiring to Redis
+# and to the host's Ollama). Each service only overrides AGENT_ROLE.
+x-agent-base: &agent-base
+  build:
+    context: .
+    dockerfile: docker/Dockerfile.agent
+  env_file: .env
+  depends_on:
+    redis:
+      condition: service_healthy
+  # Lets containers reach Ollama on the host (host-gateway works on Linux too).
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - redis-data:/data
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    env_file: .env
+    # Compose env overrides .env so the "redis" service name resolves in-network.
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  planner:
+    <<: *agent-base
+    environment:
+      AGENT_ROLE: planner
+      REDIS_URL: redis://redis:6379/0
+
+  critic:
+    <<: *agent-base
+    environment:
+      AGENT_ROLE: critic
+      REDIS_URL: redis://redis:6379/0
+
+  aggregator:
+    <<: *agent-base
+    environment:
+      AGENT_ROLE: aggregator
+      REDIS_URL: redis://redis:6379/0
+
+  # The work-heavy stage: no container_name, so it scales horizontally.
+  # `--scale executor=N` overrides the replica count below.
+  executor:
+    <<: *agent-base
+    environment:
+      AGENT_ROLE: executor
+      REDIS_URL: redis://redis:6379/0
+    deploy:
+      replicas: 3
+
+volumes:
+  redis-data:
